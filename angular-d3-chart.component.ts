@@ -35,6 +35,7 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   @Input() chartHeight = 400;
   @Input() chartName = 'defaultChart';
   @Input() enableTooltip = true;
+  @Input() zoomMode: 'freeze' | 'scroll' = 'freeze';
 
   chartId = 'chart';
   private displayData: ChartData[] = [];
@@ -47,6 +48,10 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   private colorScale: any;
 
   private lastMouseCoordinates: [number, number] | null = null;
+
+  private zoomStartDate: Date | null = null;
+  private zoomEndDate: Date | null = null;
+  private zoomDurationMs: number | null = null;
 
   constructor(
     private chartService: ChartGeneratorService,
@@ -63,12 +68,43 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['chartData'] || changes['linesConfig']) {
+    if (changes['chartData'] || changes['linesConfig'] || changes['zoomMode']) {
       this.displayData = [...this.chartData];
       
       if (this.isBrowser) {
         this.calculateWidth();
         
+        if (changes['linesConfig'] || changes['zoomMode']) {
+          this.resetZoomState();
+        }
+
+        if (this.zoomStartDate && this.zoomEndDate) {
+          if (this.zoomMode === 'scroll' && this.zoomDurationMs && this.chartData.length > 0) {
+            const lastPointTime = d3.isoParse(this.chartData[this.chartData.length - 1].time)?.getTime() || Date.now();
+            
+            this.zoomEndDate = new Date(lastPointTime);
+            this.zoomStartDate = new Date(lastPointTime - this.zoomDurationMs);
+            
+            const filtered = this.chartService.filterDataByDateRange(this.chartData, this.zoomStartDate, this.zoomEndDate);
+
+            if (filtered.length > 1) {
+              const actualStart = d3.isoParse(filtered[0].time) || this.zoomStartDate;
+              const actualEnd = d3.isoParse(filtered[filtered.length - 1].time) || this.zoomEndDate;
+              
+              this.zoomStartDate = actualStart;
+              this.zoomEndDate = actualEnd;
+              this.displayData = filtered;
+            } else {
+              this.displayData = [...this.chartData];
+              this.resetZoomState();
+            }
+          } else {
+            this.displayData = this.chartService.filterDataByDateRange(this.chartData, this.zoomStartDate, this.zoomEndDate);
+          }
+        } else {
+          this.displayData = [...this.chartData];
+        }
+
         if (!this.svgGraph || changes['linesConfig']) {
           this.showLoader();
           this.buildChart();
@@ -111,6 +147,10 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       .attr('transform', `translate(${this.margin.left}, ${this.margin.top})`)
       .attr('id', this.chartId);
 
+    const daterange: [Date, Date] | undefined = (this.zoomStartDate && this.zoomEndDate) 
+      ? [this.zoomStartDate, this.zoomEndDate] 
+      : undefined;
+
     this.chartService.initializeChart(
       this.displayData,
       this.linesConfig,
@@ -118,24 +158,32 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       this.chartHeight,
       this.chartName,
       this.enableTooltip,
-      this.svgGraph
+      this.svgGraph,
+      daterange
     );
 
     this.addZoomSelection(this.svgContainerRef, this.svgGraph);
     this.svgContainerRef.on('dblclick', () => this.resetZoom(this.svgGraph));
+
+    this.refreshTooltipEvents();
   }
 
   private updateChartState(): void {
     if (!this.svgGraph) return;
+
+    const daterange: [Date, Date] | undefined = (this.zoomStartDate && this.zoomEndDate) 
+      ? [this.zoomStartDate, this.zoomEndDate] 
+      : undefined;
 
     this.chartService.updateChart(
       this.displayData,
       this.linesConfig,
       this.chartName,
       this.svgGraph,
-      this.width-35,
+      this.width - 35,
       this.chartHeight,
-      this.enableTooltip
+      this.enableTooltip,
+      daterange
     );
 
     this.refreshTooltipEvents();
@@ -148,15 +196,19 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   private triggerTooltipManualUpdate(): void {
     if (!this.lastMouseCoordinates || !this.svgGraph) return;
 
+    const daterange: [Date, Date] | undefined = (this.zoomStartDate && this.zoomEndDate) 
+      ? [this.zoomStartDate, this.zoomEndDate] 
+      : undefined;
+
     const extent = this.chartService.getTimeExtent(this.displayData);
-    const [x, y] = this.chartService.getScales(extent, this.width - 35, this.chartHeight);
+    const [x, y] = this.chartService.getScales(extent, this.width - 35, this.chartHeight, daterange);
     
     const focus = this.svgGraph.select('.focus-group');
     const tooltipGroup = this.svgGraph.select('.svg-tooltip-container');
     const tooltipRect = tooltipGroup.select('.tooltip-bg');
     const tooltipText = tooltipGroup.select('.tooltip-text');
 
-    if (!focus.empty() && !tooltipGroup.empty()) {
+    if (!focus.empty() && !tooltipGroup.empty() && this.displayData.length > 0) {
       this.chartService.renderTooltipAtCoordinates(
         this.lastMouseCoordinates,
         x, y,
@@ -169,9 +221,9 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   }
 
   private refreshTooltipEvents(): void {
-    if (!this.enableTooltip || !this.svgContainerRef) return;
+    if (!this.enableTooltip || !this.svgGraph) return;
 
-    this.svgContainerRef.select('.overlay')
+    this.svgGraph.selectAll('.overlay')
       .on('mouseover', () => {
         this.svgGraph.select('.focus-group').style('display', null);
       })
@@ -186,8 +238,15 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       });
   }
 
+  private resetZoomState(): void {
+    this.zoomStartDate = null;
+    this.zoomEndDate = null;
+    this.zoomDurationMs = null;
+  }
+
   private resetZoom(graph: any): void {
     this.showLoader();
+    this.resetZoomState();
     this.displayData = [...this.chartData];
     this.buildChart();
   }
@@ -210,11 +269,19 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       if (selectedAreaStartX !== null && selectedAreaEndX !== null) {
         if (Math.abs(selectedAreaStartX - selectedAreaEndX) > 5) {
           this.showLoader();
-          const xScale = this.chartService.getXScale(this.displayData, this.width);
-          const startX = xScale.invert(Math.min(selectedAreaStartX, selectedAreaEndX));
-          const endX = xScale.invert(Math.max(selectedAreaStartX, selectedAreaEndX));
-          
-          this.displayData = this.chartService.filterDataByDateRange(this.chartData, startX, endX);
+
+          const daterange: [Date, Date] | undefined = (this.zoomStartDate && this.zoomEndDate) 
+            ? [this.zoomStartDate, this.zoomEndDate] 
+            : undefined;
+
+          const xScale = this.chartService.getXScale(this.displayData, this.width - 35, daterange);
+
+          this.zoomStartDate = xScale.invert(Math.min(selectedAreaStartX, selectedAreaEndX));
+          this.zoomEndDate = xScale.invert(Math.max(selectedAreaStartX, selectedAreaEndX));
+
+          this.zoomDurationMs = this.zoomEndDate!.getTime() - this.zoomStartDate!.getTime();
+
+          this.displayData = this.chartService.filterDataByDateRange(this.chartData, this.zoomStartDate!, this.zoomEndDate!);
           this.updateChartState();
         }
         selectedAreaStartX = null;

@@ -46,7 +46,7 @@ export class ChartGeneratorService {
     return document.getElementById(svgId) !== null;
   }
 
-  updateChart(data: ChartData[], configs: LineConfig[], chartName: string, svg: any, width: number, height: number, isTooltip: boolean) {
+  updateChart(data: ChartData[], configs: LineConfig[], chartName: string, svg: any, width: number, height: number, isTooltip: boolean, daterange?: [Date, Date]) {
     svg.selectAll('.axisWhite, .focusLine, .focusCircle, .tooltip-bg, .tooltip-text, .overlay, .svg-tooltip-container, .focus-group').remove();
 
     if (data.length === 0) {
@@ -55,8 +55,13 @@ export class ChartGeneratorService {
       return;
     }
 
+    const clipRect = svg.select('#clip rect');
+    if (!clipRect.empty()) {
+      clipRect.attr('width', width).attr('height', height);
+    }
+
     const extent: any = this.getTimeExtent(data);
-    const [x, y] = this.getScales(extent, width, height);
+    const [x, y] = this.getScales(extent, width, height, daterange);
 
     const xAxisGrid = d3.axisBottom(x).tickSize(-height)
       .tickFormat((d: any) => d3.timeFormat(width < 1000 ? "%H:%M:%S" : "%d.%m.%y %H:%M:%S")(d));
@@ -220,7 +225,6 @@ export class ChartGeneratorService {
     tooltipGroup.append('rect').attr('class', 'tooltip-bg').style('fill', '#ffffff').style('stroke', 'black').style('stroke-width', 1).style('width', '200px').style('pointer-events', 'none').style('rx','15');
     tooltipGroup.append('text').style('fill', 'black').attr('class', 'tooltip-text').style('font-size', '12px').style('pointer-events', 'none');
 
-    // Оверлей теперь просто транслирует события наверх в компонент
     svg.append('rect')
       .attr('class', 'overlay')
       .attr('width', width).attr('height', height)
@@ -280,8 +284,8 @@ export class ChartGeneratorService {
     });
   }
 
-  getXScale(data: ChartData[], width: number): any {
+  getXScale(data: ChartData[], width: number, daterange?: [Date, Date]): any {
     const extent = this.getTimeExtent(data);
-    return d3.scaleTime().domain(extent).range([0, width]);
+    return d3.scaleTime().domain(daterange || extent).range([0, width]);
   }
 }
