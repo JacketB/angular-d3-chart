@@ -1,0 +1,16 @@
+<div style="background-color: var(--scada-bg);">
+    <div #chartContainer [id]="chartId"></div>
+    <div class="chart-legend" *ngIf="linesConfig().length > 0">
+      <div
+        *ngFor="let line of linesConfig(); let i = index"
+        class="legend-item"
+        [class.disabled]="line.visible === false"
+        (click)="toggleLine(line)"
+      >
+        <span class="legend-color-picker" [style.background-color]="getLineColor(line.key)"></span>
+        <span class="legend-label">{{ line.label }}</span>
+      </div>
+    </div>
+    <div [id]="'loader' + chartName()" class="loader" style="display: none"></div>
+</div>
+
