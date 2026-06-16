@@ -1,64 +1,128 @@
-# AngularD3Chart
+# Angular D3 SCADA Chart Library
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.0.
+Библиотека предоставляет легковесный Angular-компонент на базе D3.js для визуализации многопоточных динамических данных (трендов) в реальном времени. Элементы графика оптимизированы для интеграции в SCADA и веб-интерфейсы систем мониторинга.
 
-## Code scaffolding
+## Основные возможности
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+* **Динамическое обновление данных:** Обновление путей линий и подписей осей «на лету» через механизм Change Detection (включая Angular Signals) без полной перерисовки DOM-структуры SVG.
+* **Интерактивный масштабируемый зум:** Выделение области графика мышью (Drag-and-Zoom) для фильтрации временного диапазона без прерывания потока данных. Сброс масштаба по двойному клику.
+* **Интерактивный SVG-тултип:** Динамическое перекрестие (Crosshair) и информационное окно, отображающее точные значения всех параметров в ближайшей по времени точке.
+* **Фильтрация разрывов:** Автоматическая визуализация непрерывных линий.
 
-```bash
-ng generate component component-name
-```
+## Требования и зависимости
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+* Angular >= 17
+* D3.js >= 7.0
+* Moment.js >= 2.0
 
-```bash
-ng generate --help
-```
+## Установка
 
-## Building
-
-To build the library, run:
-
-```bash
-ng build angular-d3-chart
-```
-
-This command will compile your project, and the build artifacts will be placed in the `dist/` directory.
-
-### Publishing the Library
-
-Once the project is built, you can publish your library by following these steps:
-
-1. Navigate to the `dist` directory:
-
-   ```bash
-   cd dist/angular-d3-chart
-   ```
-
-2. Run the `npm publish` command to publish your library to the npm registry:
-   ```bash
-   npm publish
-   ```
-
-## Running unit tests
-
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+Установите необходимые peer-зависимости в ваш проект:
 
 ```bash
-ng test
+npm install d3 moment
+npm install @types/d3 --save-dev
+
 ```
 
-## Running end-to-end tests
+## Использование
 
-For end-to-end (e2e) testing, run:
+### 1. Подключение компонента
 
-```bash
-ng e2e
+Импортируйте компонент `AngularD3ChartComponent` в ваш модуль или Standalone-компонент:
+
+```typescript
+import { Component, OnInit, signal } from '@angular/core';
+import { AngularD3ChartComponent } from 'angular-d3-chart';
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [AngularD3ChartComponent],
+  templateUrl: './app.component.html'
+})
+export class AppComponent implements OnInit {
+  chartDataSignal = signal<any[]>([]);
+  
+  linesConfig = [
+    { key: 'param1', label: 'Температура' },
+    { key: 'param2', label: 'Давление' }
+  ];
+
+  ngOnInit() {
+    // Инициализация и логика реалтайм-обновления данных (например, через setInterval или WebSocket)
+    this.chartDataSignal.set(this.getMockData());
+  }
+
+  private getMockData(): any[] {
+    // Возвращает массив объектов с сигнатурой ChartData
+    return [
+      { id: 'p_1', time: new Date().toISOString(), param1: 420, param2: 310 }
+    ];
+  }
+}
+
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+### 2. Шаблон компонента
 
-## Additional Resources
+Передайте конфигурацию и сигнал с данными во входные параметры компонента:
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+```html
+<div style="width: 100%; height: 500px; position: relative;">
+  <lib-angular-d3-chart 
+    [chartData]="chartDataSignal()" 
+    [linesConfig]="linesConfig"
+    chartName="scadaLiveChart"
+    [enableTooltip]="true"
+    [chartHeight]="400">
+  </lib-angular-d3-chart>
+</div>
+
+```
+
+## API компонента
+
+### Входные параметры (Inputs)
+
+| Параметр | Тип | По умолчанию | Описание |
+| --- | --- | --- | --- |
+| `chartData` | `ChartData[]` | `[]` | Массив технологических данных для отображения. |
+| `linesConfig` | `LineConfig[]` | `[]` | Конфигурация отображаемых линий (ключи и названия параметров). |
+| `chartHeight` | `number` | `400` | Фиксированная высота графика в пикселях. |
+| `chartName` | `string` | `'defaultChart'` | Уникальный идентификатор графика для изоляции DOM-элементов лоадера и линий. |
+| `enableTooltip` | `boolean` | `true` | Флаг включения/выключения интерактивного перекрестия и всплывающего окна. |
+
+### Структуры данных
+
+**LineConfig:**
+
+```typescript
+export interface LineConfig {
+  key: string;   // Ключ поля в объект данных (например, 'param1')
+  label: string; // Отображаемое имя параметра в тултипе (например, 'Температура')
+}
+
+```
+
+**ChartData:**
+
+```typescript
+export interface ChartData {
+  id: string;    // Уникальный идентификатор точки
+  time: string;  // Метка времени в формате ISO string
+  [key: string]: any; // Динамические ключи параметров, описанные в LineConfig
+}
+
+```
+
+## Стилизация
+
+Стили графиков, сетки и элементов тултипа инкапсулированы внутри компонента. Для кастомизации цветовой палитры интерфейса используйте переопределение CSS-классов через глобальные стили приложения с селектором `::ng-deep`:
+
+* `.svg-tooltip-bg` — фон и рамка всплывающего окна.
+* `.tooltip-text` — параметры шрифта текста внутри тултипа.
+* `.grid` — lines координатной сетки.
+* `.loader` — стили индикатора загрузки.
+
+```
