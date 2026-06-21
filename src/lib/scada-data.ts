@@ -10,6 +10,7 @@ export class ChartData {
 export interface LineConfig {
   key: string;
   label: string;
+  visible: boolean;
 }
 
 export class ChartLabels {

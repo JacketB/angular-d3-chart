@@ -1,5 +1,15 @@
-import { Component, OnInit, Input, SimpleChanges, OnChanges, ElementRef, ViewChild, Inject, PLATFORM_ID, HostListener } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import {
+  Component,
+  OnInit,
+  input,
+  effect,
+  ElementRef,
+  ViewChild,
+  Inject,
+  PLATFORM_ID,
+  HostListener,
+} from '@angular/core';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { ChartData, LineConfig } from './scada-data';
 import { ChartGeneratorService } from './chart-generator-service';
 import * as d3 from 'd3';
@@ -7,74 +17,114 @@ import * as d3 from 'd3';
 @Component({
   selector: 'lib-angular-d3-chart',
   standalone: true,
+  imports: [CommonModule],
   providers: [ChartGeneratorService],
-  template: `
-    <div #chartContainer [id]="chartId"></div>
-    <div [id]="'loader'+chartName" class="loader" style="display: none;"></div>
-  `,
-  styles: [`
-    :host { display: block; width: 100%; height: 500px; position: relative; }
-    ::ng-deep .selected-area { pointer-events: none; }
-    .loader {
-      width: 50px; height: 50px; border-radius: 50%; border: 5px solid #353535;
-      border-bottom-color: #00FFFF; box-sizing: border-box; animation: rotation 1s linear infinite;
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 3;
-    }
-    @keyframes rotation {
-      0% { transform: translate(-50%, -50%) rotate(0deg); }
-      100% { transform: translate(-50%, -50%) rotate(360deg); }
-    }
-  `]
+  templateUrl: './angular-d3-chart.component.html',
+  styleUrl: './angular-d3-chart.component.css',
 })
-export class AngularD3ChartComponent implements OnInit, OnChanges {
+export class AngularD3ChartComponent implements OnInit {
   @ViewChild('chartContainer', { static: true }) chartContainer!: ElementRef;
 
-  @Input() chartData: ChartData[] = [];
-  @Input() linesConfig: LineConfig[] = []; 
-  @Input() chartWidth = 800;
-  @Input() chartHeight = 400;
-  @Input() chartName = 'defaultChart';
-  @Input() enableTooltip = true;
+  chartData = input<ChartData[]>([]);
+  linesConfig = input<LineConfig[]>([]);
+  chartWidth = input<number>(800);
+  chartHeight = input<number>(400);
+  chartName = input<string>('defaultChart');
+  enableTooltip = input<boolean>(true);
+  zoomMode = input<'freeze' | 'scroll'>('freeze');
 
   chartId = 'chart';
   private displayData: ChartData[] = [];
   margin = { top: 10, right: 30, bottom: 40, left: 30 };
-  width = 0; 
+  width = 0;
   isBrowser = false;
 
   private svgGraph: any;
   private svgContainerRef: any;
   private colorScale: any;
 
+  private lastMouseCoordinates: [number, number] | null = null;
+  private zoomStartDate: Date | null = null;
+  private zoomEndDate: Date | null = null;
+  private zoomDurationMs: number | null = null;
+
   constructor(
     private chartService: ChartGeneratorService,
-    @Inject(PLATFORM_ID) private platformId: Object
+    @Inject(PLATFORM_ID) private platformId: Object,
   ) {
     this.isBrowser = isPlatformBrowser(this.platformId);
+
+    effect(
+      () => {
+        const rawData = this.chartData();
+        const configs = this.linesConfig();
+        const mode = this.zoomMode();
+
+        if (this.isBrowser) {
+          this.calculateWidth();
+
+          if (this.zoomStartDate && this.zoomEndDate) {
+            if (mode === 'scroll' && this.zoomDurationMs && rawData.length > 0) {
+              const lastPointTime =
+                d3.isoParse(rawData[rawData.length - 1].time)?.getTime() || Date.now();
+              this.zoomEndDate = new Date(lastPointTime);
+              this.zoomStartDate = new Date(lastPointTime - this.zoomDurationMs);
+
+              const filtered = this.chartService.filterDataByDateRange(
+                rawData,
+                this.zoomStartDate,
+                this.zoomEndDate,
+              );
+
+              if (filtered.length > 1) {
+                this.zoomStartDate = d3.isoParse(filtered[0].time) || this.zoomStartDate;
+                this.zoomEndDate =
+                  d3.isoParse(filtered[filtered.length - 1].time) || this.zoomEndDate;
+                this.displayData = filtered;
+              } else {
+                this.displayData = [...rawData];
+                this.resetZoomState();
+              }
+            } else {
+              this.displayData = this.chartService.filterDataByDateRange(
+                rawData,
+                this.zoomStartDate,
+                this.zoomEndDate,
+              );
+            }
+          } else {
+            this.displayData = [...rawData];
+          }
+
+          if (!this.svgGraph) {
+            this.showLoader();
+            this.buildChart();
+          } else {
+            this.updateChartState();
+          }
+        }
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   ngOnInit(): void {
-    this.displayData = [...this.chartData];
-    if (!this.isBrowser) return;
-    this.calculateWidth();
-    this.buildChart();
+    this.displayData = [...this.chartData()];
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['chartData'] || changes['linesConfig']) {
-      this.displayData = [...this.chartData];
-      
-      if (this.isBrowser) {
-        this.calculateWidth();
-        
-        if (!this.svgGraph || changes['linesConfig']) {
-          this.showLoader();
-          this.buildChart();
-        } else {
-          this.updateChartState();
-        }
-      }
-    }
+  private resetZoomState(): void {
+    this.zoomStartDate = null;
+    this.zoomEndDate = null;
+    this.zoomDurationMs = null;
+  }
+
+  toggleLine(line: LineConfig): void {
+    line.visible = line.visible !== false ? false : true;
+    this.updateChartState(true);
+  }
+
+  getLineColor(key: string): string {
+    return this.colorScale ? this.colorScale(key) : '#ccc';
   }
 
   @HostListener('window:resize')
@@ -86,87 +136,138 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
   }
 
   private showLoader(): void {
-    const loader = document.getElementById('loader' + this.chartName);
+    const loader = document.getElementById('loader' + this.chartName());
     if (loader) loader.style.display = 'block';
   }
 
   private calculateWidth(): void {
-    this.width = (window.innerWidth * 0.8) - this.margin.left - this.margin.right;
+    const containerElement = this.chartContainer.nativeElement;
+    const containerWidth = containerElement.offsetWidth || window.innerWidth * 0.8;
+    this.width = containerWidth;
   }
 
   private buildChart(): void {
     const container = d3.select(this.chartContainer.nativeElement);
     container.selectAll('*').remove();
 
-    const keys = this.linesConfig.map(c => c.key);
+    const keys = this.linesConfig().map((c) => c.key);
     this.colorScale = d3.scaleOrdinal<string>().domain(keys).range(d3.schemeCategory10);
 
-    this.svgContainerRef = container.append('svg')
-      .attr('width', this.width + this.margin.left + this.margin.right)
-      .attr('height', this.chartHeight + this.margin.top + this.margin.bottom);
+    this.svgContainerRef = container
+      .append('svg')
+      .attr('width', this.width)
+      .attr('height', this.chartHeight() + this.margin.top + this.margin.bottom);
 
-    this.svgGraph = this.svgContainerRef.append('g')
+    this.svgGraph = this.svgContainerRef
+      .append('g')
       .attr('transform', `translate(${this.margin.left}, ${this.margin.top})`)
       .attr('id', this.chartId);
 
+    const daterange: [Date, Date] | undefined =
+      this.zoomStartDate && this.zoomEndDate ? [this.zoomStartDate, this.zoomEndDate] : undefined;
+
     this.chartService.initializeChart(
       this.displayData,
-      this.linesConfig,
+      this.linesConfig(),
       this.width,
-      this.chartHeight,
-      this.chartName,
-      this.enableTooltip,
-      this.svgGraph
+      this.chartHeight(),
+      this.chartName(),
+      this.enableTooltip(),
+      this.svgGraph,
+      daterange,
     );
 
     this.addZoomSelection(this.svgContainerRef, this.svgGraph);
-    this.svgContainerRef.on('dblclick', () => this.resetZoom(this.svgGraph));
-  }
-
-  private updateChartState(): void {
-    if (!this.svgGraph) return;
-
-    this.chartService.updateChart(
-      this.displayData,
-      this.linesConfig,
-      this.chartName,
-      this.svgGraph,
-      this.width-35,
-      this.chartHeight,
-      this.enableTooltip
-    );
-
+    this.svgContainerRef.on('dblclick', () => this.resetZoom());
     this.refreshTooltipEvents();
   }
 
-  private refreshTooltipEvents(): void {
-    if (!this.enableTooltip || !this.svgContainerRef) return;
+  private updateChartState(animate = false): void {
+    if (!this.svgGraph) return;
+
+    const daterange: [Date, Date] | undefined =
+      this.zoomStartDate && this.zoomEndDate ? [this.zoomStartDate, this.zoomEndDate] : undefined;
+
+    this.chartService.updateChart(
+      this.displayData,
+      this.linesConfig(),
+      this.chartName(),
+      this.svgGraph,
+      this.width - 35,
+      this.chartHeight(),
+      this.enableTooltip(),
+      daterange,
+      animate,
+    );
+
+    if (this.enableTooltip() && this.lastMouseCoordinates) {
+      this.triggerTooltipManualUpdate();
+    }
+  }
+
+  private triggerTooltipManualUpdate(): void {
+    if (!this.lastMouseCoordinates || !this.svgGraph) return;
+
+    const daterange: [Date, Date] | undefined =
+      this.zoomStartDate && this.zoomEndDate ? [this.zoomStartDate, this.zoomEndDate] : undefined;
 
     const extent = this.chartService.getTimeExtent(this.displayData);
-    const [x, y] = this.chartService.getScales(extent, this.width, this.chartHeight);
-    
+
+    const [x, y] = this.chartService.getScales(
+      extent,
+      this.width - 35,
+      this.chartHeight(),
+      daterange,
+      this.displayData,
+      this.linesConfig(),
+    );
+
     const focus = this.svgGraph.select('.focus-group');
     const tooltipGroup = this.svgGraph.select('.svg-tooltip-container');
     const tooltipRect = tooltipGroup.select('.tooltip-bg');
     const tooltipText = tooltipGroup.select('.tooltip-text');
 
-    if (!focus.empty() && !tooltipGroup.empty()) {
-      this.svgContainerRef.select('.overlay')
-        .on('mousemove', (event: any) => {
-          this.chartService.mousemove(
-            event, x, y, 
-            this.displayData, 
-            this.linesConfig, 
-            focus, tooltipGroup, tooltipRect, tooltipText, 
-            this.width, this.chartHeight, this.colorScale
-          );
-        });
+    if (!focus.empty() && !tooltipGroup.empty() && this.displayData.length > 0) {
+      this.chartService.renderTooltipAtCoordinates(
+        this.lastMouseCoordinates,
+        x,
+        y,
+        this.displayData,
+        this.linesConfig(),
+        focus,
+        tooltipGroup,
+        tooltipRect,
+        tooltipText,
+        this.width - 35,
+        this.chartHeight(),
+        this.colorScale,
+      );
     }
   }
 
-  private resetZoom(graph: any): void {
+  private refreshTooltipEvents(): void {
+    if (!this.enableTooltip() || !this.svgGraph) return;
+
+    this.svgGraph
+      .selectAll('.overlay')
+      .on('mouseover', () => {
+        this.svgGraph.select('.focus-group').style('display', null);
+      })
+      .on('mouseout', () => {
+        this.svgGraph.select('.focus-group').style('display', 'none');
+        this.svgGraph.select('.svg-tooltip-container').style('opacity', 0);
+        this.lastMouseCoordinates = null;
+      })
+      .on('mousemove', (event: any) => {
+        this.lastMouseCoordinates = d3.pointer(event, event.currentTarget);
+        this.triggerTooltipManualUpdate();
+      });
+  }
+
+  private resetZoom(): void {
     this.showLoader();
-    this.displayData = [...this.chartData];
+    this.resetZoomState();
+    this.displayData = [...this.chartData()];
     this.buildChart();
   }
 
@@ -179,8 +280,14 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       if (selectedAreaStartX !== null && selectedAreaEndX !== null) {
         const x1 = Math.min(selectedAreaStartX, selectedAreaEndX);
         const x2 = Math.max(selectedAreaStartX, selectedAreaEndX);
-        graph.append('rect').attr('class', 'selected-area').attr('x', x1).attr('y', 0)
-          .attr('width', Math.abs(x2 - x1)).attr('height', this.chartHeight).attr('fill', '#5f5f5f36');
+        graph
+          .append('rect')
+          .attr('class', 'selected-area')
+          .attr('x', x1)
+          .attr('y', 0)
+          .attr('width', Math.abs(x2 - x1))
+          .attr('height', this.chartHeight())
+          .attr('fill', '#5f5f5f36');
       }
     };
 
@@ -188,11 +295,24 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       if (selectedAreaStartX !== null && selectedAreaEndX !== null) {
         if (Math.abs(selectedAreaStartX - selectedAreaEndX) > 5) {
           this.showLoader();
-          const xScale = this.chartService.getXScale(this.displayData, this.width);
-          const startX = xScale.invert(Math.min(selectedAreaStartX, selectedAreaEndX));
-          const endX = xScale.invert(Math.max(selectedAreaStartX, selectedAreaEndX));
-          
-          this.displayData = this.chartService.filterDataByDateRange(this.chartData, startX, endX);
+
+          const daterange: [Date, Date] | undefined =
+            this.zoomStartDate && this.zoomEndDate
+              ? [this.zoomStartDate, this.zoomEndDate]
+              : undefined;
+
+          const xScale = this.chartService.getXScale(this.displayData, this.width - 35, daterange);
+
+          this.zoomStartDate = xScale.invert(Math.min(selectedAreaStartX, selectedAreaEndX));
+          this.zoomEndDate = xScale.invert(Math.max(selectedAreaStartX, selectedAreaEndX));
+
+          this.zoomDurationMs = this.zoomEndDate!.getTime() - this.zoomStartDate!.getTime();
+
+          this.displayData = this.chartService.filterDataByDateRange(
+            this.chartData(),
+            this.zoomStartDate!,
+            this.zoomEndDate!,
+          );
           this.updateChartState();
         }
         selectedAreaStartX = null;
@@ -201,14 +321,18 @@ export class AngularD3ChartComponent implements OnInit, OnChanges {
       }
     };
 
-    const drag = d3.drag<SVGSVGElement, any>()
+    const drag = d3
+      .drag<SVGSVGElement, any>()
       .on('start', (event) => {
         const coords = d3.pointer(event, graph.node());
-        selectedAreaStartX = coords[0]; selectedAreaEndX = coords[0]; updateSelectedArea();
+        selectedAreaStartX = coords[0];
+        selectedAreaEndX = coords[0];
+        updateSelectedArea();
       })
       .on('drag', (event) => {
         const coords = d3.pointer(event, graph.node());
-        selectedAreaEndX = coords[0]; updateSelectedArea();
+        selectedAreaEndX = coords[0];
+        updateSelectedArea();
       })
       .on('end', handleSelection);
 

@@ -1,0 +1,95 @@
+:host {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  position: relative;
+  box-sizing: border-box;
+
+  --scada-bg: #ffffff;
+  --scada-grid-lines: #c2c2c2;
+  --scada-axis-text: #333333;
+  --scada-tooltip-bg: #ffffff;
+  --scada-tooltip-border: #e0e0e0;
+  --scada-tooltip-text-main: #111111;
+  --scada-tooltip-text-muted: #666666;
+  --scada-legend-hover: #f0f0f0;
+  --scada-crosshair: #555555;
+}
+
+:host-context(.dark-theme) {
+  --scada-bg: #1e1e1e;
+  --scada-grid-lines: #6d6d6d;
+  --scada-axis-text: #aaaaaa;
+  --scada-tooltip-bg: #252526;
+  --scada-tooltip-border: #3f3f46;
+  --scada-tooltip-text-main: #ffffff;
+  --scada-tooltip-text-muted: #888888;
+  --scada-legend-hover: #2a2a2b;
+  --scada-crosshair: #888888;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  justify-content: center;
+  margin-bottom: 15px;
+  padding: 5px;
+  font-family: sans-serif;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition:
+    opacity 0.2s,
+    background-color 0.2s;
+  user-select: none;
+}
+.legend-item:hover {
+  background-color: var(--scada-legend-hover);
+}
+.legend-item.disabled {
+  opacity: 0.3;
+}
+.legend-color-picker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-label {
+  font-size: 14px;
+  color: var(--scada-axis-text);
+  font-weight: 500;
+}
+
+::ng-deep .selected-area {
+  pointer-events: none;
+}
+.loader {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 5px solid #353535;
+  border-bottom-color: #00ffff;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+@keyframes rotation {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
